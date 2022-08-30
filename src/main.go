@@ -163,7 +163,7 @@ func createDocument(es *elasticsearch.Client, payload string) error {
 		return fmt.Errorf("cannot create document (index: %s, %s, %s)", indexName, payload, res.Status())
 	}
 
-	log.Printf("Elasticsearch successfully create document (Index: %s, %s)", indexName, payload)
+	log.Printf("Elasticsearch successfully create document (index: %s, %s)", indexName, payload)
 
 	return nil
 }
