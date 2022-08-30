@@ -39,6 +39,7 @@ func main() {
 		cancel()
 	}()
 
+	// Need refactor
 	if viper.GetString("KAFKA_HOST") == "" {
 		log.Fatal("Config/environment variable KAFKA_HOST not defined.")
 	}
@@ -77,9 +78,6 @@ func main() {
 		Brokers: []string{cfg.KafkaHost},
 		Topic:   "analytic_event",
 		GroupID: cfg.KafkaConsumerGroupName,
-		// StartOffset: kafka.LastOffset,
-		// MinBytes: 10e3, // 10KB
-		// MaxBytes: 10e6, // 10MB
 	})
 
 	defer func() {
@@ -101,12 +99,14 @@ func main() {
 	}
 	es, err := elasticsearch.NewClient(elasticConfig)
 	if err != nil {
+		// @TODO should better signal/error handling
 		_ = kafkaReader.Close()
 		log.Fatalf("Error creating the Elasticsearch client (%s)", err)
 	}
 
 	_, err = es.Ping()
 	if err != nil {
+		// @TODO should better signal/error handling
 		_ = kafkaReader.Close()
 		log.Fatalf("Error connecting to Elasticsearch server (%s)", err)
 	}
@@ -117,6 +117,7 @@ func main() {
 	for {
 		m, err := kafkaReader.FetchMessage(ctx) // without auto-commit
 		if err != nil {
+			// @TODO should better signal/error handling
 			_ = kafkaReader.Close()
 			log.Fatalf("Error fetching message from Kafka (%s)", err)
 		}
@@ -127,11 +128,13 @@ func main() {
 		)
 
 		if err := createDocument(es, string(m.Value)); err != nil {
+			// @TODO should better signal/error handling
 			_ = kafkaReader.Close()
 			log.Fatalf("Elasticsearch error: %s", err)
 		}
 
 		if err := kafkaReader.CommitMessages(ctx, m); err != nil {
+			// @TODO should better signal/error handling
 			_ = kafkaReader.Close()
 			log.Fatalf("Failed commit messages to Kafka server (%s)", err)
 		}
