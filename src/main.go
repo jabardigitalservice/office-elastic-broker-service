@@ -75,9 +75,9 @@ func main() {
 
 	log.Printf("Initializing Kafka client (%s)", cfg.KafkaHost)
 	kafkaReader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers: []string{cfg.KafkaHost},
-		Topic:   "analytic_event",
-		GroupID: cfg.KafkaConsumerGroupName,
+		Brokers:     []string{cfg.KafkaHost},
+		GroupTopics: []string{"analytic_event", "esign_activity"},
+		GroupID:     cfg.KafkaConsumerGroupName,
 	})
 
 	defer func() {
@@ -113,7 +113,7 @@ func main() {
 
 	log.Printf("Connected to Elasticsearch server.")
 
-	log.Printf("Listening from Kafka... (Topic: %s, Consumer Group: %s)", kafkaReader.Config().Topic, kafkaReader.Config().GroupID)
+	log.Printf("Listening from Kafka... (Topics: %s, Consumer Group: %s)", kafkaReader.Config().GroupTopics, kafkaReader.Config().GroupID)
 	for {
 		m, err := kafkaReader.FetchMessage(ctx) // without auto-commit
 		if err != nil {
