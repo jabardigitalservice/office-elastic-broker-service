@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"github.com/elastic/go-elasticsearch/v8"
 	"github.com/elastic/go-elasticsearch/v8/esapi"
-	"github.com/jabardigitalservice/office-elastic-broker-service/cmd/server"
-	"github.com/jabardigitalservice/office-elastic-broker-service/config"
 	"github.com/segmentio/kafka-go"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -26,12 +26,19 @@ func main() {
 
 	log.Println("Starting application...")
 
-	if err := run(); err != nil {
-		log.Fatalln("Error:", err)
-	}
-}
+	signals := make(chan os.Signal, 1)
 
-func run() error {
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGKILL)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// go routine for getting signals asynchronously
+	go func() {
+		sig := <-signals
+		log.Println("Got signal: ", sig)
+		cancel()
+	}()
+
 	if viper.GetString("KAFKA_HOST") == "" {
 		log.Fatal("Config/environment variable KAFKA_HOST not defined.")
 	}
@@ -56,7 +63,7 @@ func run() error {
 		log.Fatal("Config/environment variable ELASTICSEARCH_INDEX_NAME not defined.")
 	}
 
-	cfg := config.Config{
+	cfg := Config{
 		KafkaHost:              viper.GetString("KAFKA_HOST"),
 		KafkaConsumerGroupName: viper.GetString("KAFKA_CONSUMER_GROUP_NAME"),
 		ElasticsearchDSN:       viper.GetString("ELASTICSEARCH_DSN"),
@@ -66,56 +73,69 @@ func run() error {
 	}
 
 	log.Printf("Initializing Kafka client (%s)", cfg.KafkaHost)
-	conn, err := kafka.DialLeader(context.Background(), "tcp", cfg.KafkaHost, "analytic_event", 0)
-	if err != nil {
-		log.Fatalf("Error connecting to Kafka server (%s)", err)
-	}
-	defer conn.Close()
-
-	log.Printf("Connected to Kafka server.")
-
-	r := kafka.NewReader(kafka.ReaderConfig{
+	kafkaReader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers: []string{cfg.KafkaHost},
 		Topic:   "analytic_event",
 		GroupID: cfg.KafkaConsumerGroupName,
 		// StartOffset: kafka.LastOffset,
-		MinBytes: 10e3, // 10KB
-		MaxBytes: 10e6, // 10MB
+		// MinBytes: 10e3, // 10KB
+		// MaxBytes: 10e6, // 10MB
 	})
 
+	defer func() {
+		err := kafkaReader.Close()
+		if err != nil {
+			log.Println("Error closing Kafka consumer: ", err)
+			return
+		}
+		log.Println("Kafka Consumer closed")
+	}()
+
 	log.Printf("Initializing Elasticsearch client (%s)", cfg.ElasticsearchDSN)
-	es, err := config.ElasticConfig(cfg)
+	elasticConfig := elasticsearch.Config{
+		Addresses: []string{
+			cfg.ElasticsearchDSN,
+		},
+		Username: cfg.ElasticsearchUsername,
+		Password: cfg.ElasticsearchPassword,
+	}
+	es, err := elasticsearch.NewClient(elasticConfig)
 	if err != nil {
+		//_ = kafkaReader.Close()
 		log.Fatalf("Error creating the Elasticsearch client (%s)", err)
 	}
 
 	_, err = es.Ping()
 	if err != nil {
+		//_ = kafkaReader.Close()
 		log.Fatalf("Error connecting to Elasticsearch server (%s)", err)
 	}
 
 	log.Printf("Connected to Elasticsearch server.")
 
-	log.Printf("Listening from Kafka (Topic: %s, Group: %s)...", r.Config().Topic, r.Config().GroupID)
+	log.Printf("Listening from Kafka... (Topic: %s, Consumer Group: %s)", kafkaReader.Config().Topic, kafkaReader.Config().GroupID)
 	for {
-		m, err := r.ReadMessage(context.Background())
+		m, err := kafkaReader.FetchMessage(ctx) // without auto-commit
 		if err != nil {
-			log.Fatalf("Error connecting to Kafka server (%s)", err)
+			_ = kafkaReader.Close()
+			log.Fatalf("Error fetching message from Kafka (%s)", err)
 		}
 
-		log.Printf("Received message from Kafka %v/%v/%v: %s = %s", m.Topic, m.Partition, m.Offset, string(m.Key), string(m.Value))
+		log.Printf(
+			"Received message from Kafka (Created: %s, Topic: %s, Partition: %v, Offset: %v, Key: %s, Value: %s)",
+			m.Time, m.Topic, m.Partition, m.Offset, string(m.Key), string(m.Value),
+		)
 
-		err = createDocument(es, string(m.Value))
-		if err != nil {
-			break
+		if err := createDocument(es, string(m.Value)); err != nil {
+			_ = kafkaReader.Close()
+			log.Fatalf("Elasticsearch error: %s", err)
+		}
+
+		if err := kafkaReader.CommitMessages(ctx, m); err != nil {
+			_ = kafkaReader.Close()
+			log.Fatalf("Failed commit messages to Kafka server (%s)", err)
 		}
 	}
-
-	if err := r.Close(); err != nil {
-		log.Fatal("Failed to close reader:", err)
-	}
-
-	return server.Start(cfg)
 }
 
 func createDocument(es *elasticsearch.Client, payload string) error {
@@ -123,7 +143,6 @@ func createDocument(es *elasticsearch.Client, payload string) error {
 	currentDatetime := time.Now().In(timeZone)
 	indexNamePrefix := viper.GetString("ELASTICSEARCH_INDEX_NAME")
 	indexName := fmt.Sprintf("%s-%s", indexNamePrefix, currentDatetime.Format("2006.01"))
-	log.Printf("Elasticsearch index name: %s", indexName)
 
 	// Set up the request object.
 	req := esapi.IndexRequest{
@@ -135,18 +154,16 @@ func createDocument(es *elasticsearch.Client, payload string) error {
 	// Perform the request with the client.
 	res, err := req.Do(context.Background(), es)
 	if err != nil {
-		log.Errorf("Elasticsearch error getting response (%s)", err)
-		return err
+		return fmt.Errorf("elasticsearch error getting response (Index: %s, %s, %s)", indexName, payload, err)
 	}
-
-	log.Printf("Elasticsearch successfully create document %s", payload)
 
 	defer res.Body.Close()
 
 	if res.IsError() {
-		log.Errorf("Elasticsearch error create document (%s)", res.Status())
-		return err
+		return fmt.Errorf("cannot create document (index: %s, %s, %s)", indexName, payload, res.Status())
 	}
+
+	log.Printf("Elasticsearch successfully create document (Index: %s, %s)", indexName, payload)
 
 	return nil
 }
