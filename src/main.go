@@ -101,13 +101,13 @@ func main() {
 	}
 	es, err := elasticsearch.NewClient(elasticConfig)
 	if err != nil {
-		//_ = kafkaReader.Close()
+		_ = kafkaReader.Close()
 		log.Fatalf("Error creating the Elasticsearch client (%s)", err)
 	}
 
 	_, err = es.Ping()
 	if err != nil {
-		//_ = kafkaReader.Close()
+		_ = kafkaReader.Close()
 		log.Fatalf("Error connecting to Elasticsearch server (%s)", err)
 	}
 
