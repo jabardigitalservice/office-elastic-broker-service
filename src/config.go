@@ -4,7 +4,6 @@ type Config struct {
 	KafkaHost              string
 	KafkaConsumerGroupName string
 	ElasticsearchDSN       string
-	ElasticsearchUsername  string
-	ElasticsearchPassword  string
+	ElasticsearchApiKey    string
 	ElasticsearchIndexName string
 }

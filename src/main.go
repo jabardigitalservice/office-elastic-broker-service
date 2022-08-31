@@ -53,12 +53,8 @@ func main() {
 		log.Fatal("Config/environment variable ELASTICSEARCH_DSN not defined.")
 	}
 
-	if viper.GetString("ELASTICSEARCH_USERNAME") == "" {
-		log.Fatal("Config/environment variable ELASTICSEARCH_USERNAME not defined.")
-	}
-
-	if viper.GetString("ELASTICSEARCH_PASSWORD") == "" {
-		log.Fatal("Config/environment variable ELASTICSEARCH_PASSWORD not defined.")
+	if viper.GetString("ELASTICSEARCH_API_KEY") == "" {
+		log.Fatal("Config/environment variable ELASTICSEARCH_API_KEY not defined.")
 	}
 
 	if viper.GetString("ELASTICSEARCH_INDEX_NAME") == "" {
@@ -69,8 +65,7 @@ func main() {
 		KafkaHost:              viper.GetString("KAFKA_HOST"),
 		KafkaConsumerGroupName: viper.GetString("KAFKA_CONSUMER_GROUP_NAME"),
 		ElasticsearchDSN:       viper.GetString("ELASTICSEARCH_DSN"),
-		ElasticsearchUsername:  viper.GetString("ELASTICSEARCH_USERNAME"),
-		ElasticsearchPassword:  viper.GetString("ELASTICSEARCH_PASSWORD"),
+		ElasticsearchApiKey:    viper.GetString("ELASTICSEARCH_API_KEY"),
 		ElasticsearchIndexName: viper.GetString("ELASTICSEARCH_INDEX_NAME"),
 	}
 
@@ -95,8 +90,7 @@ func main() {
 		Addresses: []string{
 			cfg.ElasticsearchDSN,
 		},
-		Username: cfg.ElasticsearchUsername,
-		Password: cfg.ElasticsearchPassword,
+		APIKey: cfg.ElasticsearchApiKey,
 	}
 	es, err := elasticsearch.NewClient(elasticConfig)
 	if err != nil {
