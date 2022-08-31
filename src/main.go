@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/elastic/go-elasticsearch/v8"
 	"github.com/elastic/go-elasticsearch/v8/esapi"
@@ -127,7 +128,23 @@ func main() {
 			m.Time, m.Topic, m.Partition, m.Offset, string(m.Key), string(m.Value),
 		)
 
-		if err := createDocument(es, string(m.Value)); err != nil {
+		var payloadMap map[string]interface{}
+		if err := json.Unmarshal(m.Value, &payloadMap); err != nil {
+			log.Fatalf("Error unmarshal JSON string to Map: %s", err)
+		}
+
+		payloadMap["kafka_topic"] = m.Topic
+		payloadMap["kafka_partition"] = m.Partition
+		payloadMap["kafka_offset"] = m.Offset
+		payloadMap["kafka_timestamp"] = m.Time
+
+		var payloadByte []byte
+		payloadByte, err = json.Marshal(payloadMap)
+		if err != nil {
+			log.Fatalf("Error marshal from Map to Byte JSON String: (%s)", err)
+		}
+
+		if err := createDocument(es, payloadByte); err != nil {
 			// @TODO should better signal/error handling
 			_ = kafkaReader.Close()
 			log.Fatalf("Elasticsearch error: %s", err)
@@ -141,7 +158,7 @@ func main() {
 	}
 }
 
-func createDocument(es *elasticsearch.Client, payload string) error {
+func createDocument(es *elasticsearch.Client, payload []byte) error {
 	timeZone := time.FixedZone("Asia/Jakarta", 7*3600)
 	currentDatetime := time.Now().In(timeZone)
 	indexNamePrefix := viper.GetString("ELASTICSEARCH_INDEX_NAME")
@@ -150,7 +167,7 @@ func createDocument(es *elasticsearch.Client, payload string) error {
 	// Set up the request object.
 	req := esapi.IndexRequest{
 		Index:   indexName,
-		Body:    bytes.NewReader([]byte(payload)),
+		Body:    bytes.NewReader(payload),
 		Refresh: "true",
 	}
 
