@@ -174,7 +174,10 @@ func createDocument(es *elasticsearch.Client, payload []byte) error {
 	defer res.Body.Close()
 
 	if res.IsError() {
-		return fmt.Errorf("cannot create document (index: %s, %s, %s)", indexName, payload, res.Status())
+		// @TODO hotfix because invalid mapper cannot be changed from type [long] to [text]
+		// @TODO Should better error handling / dead letter queue instead of skip
+		log.Printf("Skip record... Elasticsearch cannot create document (index: %s, %s, %s, %s)", indexName, payload, res.Status(), res.String())
+		return nil
 	}
 
 	log.Printf("Elasticsearch successfully create document (index: %s, %s)", indexName, payload)
