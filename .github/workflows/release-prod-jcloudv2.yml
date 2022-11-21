@@ -2,7 +2,7 @@ name: Release to Production Jcloudv2
 
 on:
   push:
-    branches: [development]
+    branches: [main]
     paths:
       - 'src/**'
   workflow_dispatch:
